@@ -21,11 +21,6 @@ Autenticación segura basada en JSON Web Tokens (JWT) y manejo de roles.
 ## 🚀 Características Clave
 
 - **Localización SUNAT (Perú) 🇵🇪**: Implementación completa de la estructura del estándar UBL 2.1 para Facturas (F001), Boletas (B001), Notas de Crédito (FC01) y Notas de Débito.
-- **Arquitectura Multi-País 🌍**: Módulos desacoplados y listos para conectarse con otros entes reguladores:
-  - **México (CFDI / SAT)**
-  - **Chile (DTE / SII)**
-  - **Colombia (DIAN)**
-  - **Ecuador (SRI)**
 - **Firma Digital XML Criptográfica 🔑**: Firma digital avanzada de documentos XML usando certificados estándar `.pfx` o `.pem` con criptografía asimétrica.
 - **Conectividad SOAP/REST 📡**: Comunicación directa con los servidores de la SUNAT (Homologación, Pruebas y Producción) para el envío de comprobantes y la recepción/lectura del **CDR (Constancia de Recepción)**.
 - **Generador de Representación Impresa (PDF) 📄**: Generación al vuelo de archivos PDF con diseño profesional y códigos QR dinámicos para cumplimiento normativo local.
