@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Productos - FactuElectrónica</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <script src="/js/api.js"></script>
+  <script src="/js/layout.js"></script>
+  <script>
+    renderLayout('products', 'Productos y Servicios');
+    let productos = [];
+
+    async function load() {
+      const search = document.getElementById('search')?.value || '';
+      const { data } = await API.get(`/products?empresa_id=${Auth.empresaId}&search=${encodeURIComponent(search)}`);
+      productos = data;
+      render();
+    }
+    
+    function init() {
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      setContent(`
+        <div class="card p-0">
+          <div class="card-header">
+            <h2>Productos / Servicios</h2>
+            <button class="btn btn-primary" onclick="openModal()">+ Nuevo producto</button>
+          </div>
+          <div style="padding:14px 22px 0">
+          <div class="toolbar">
+            <input type="text" id="search" placeholder="Buscar..." oninput="load()">
+          </div>
+          </div>
+          <div id="alert-box" style="padding:0 22px"></div>
+          <div class="table-wrapper">
+          <table class="table">
+            <thead><tr>
+              <th>Código</th><th>Descripción</th><th>Tipo</th><th>Unidad</th>
+              <th class="text-right">Precio</th><th class="text-right">IVA %</th>
+              <th class="text-right">Stock</th><th class="text-right">Acciones</th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="modal-overlay" id="modal">
+          <div class="modal">
+            <div class="modal-header">
+              <h2 id="modal-title">Nuevo producto</h2>
+              <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <form id="form">
+                <input type="hidden" id="f-id">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Código *</label>
+                    <input type="text" id="f-codigo" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Código SAT / UNSPSC</label>
+                    <input type="text" id="f-codigo_sat">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Descripción *</label>
+                  <input type="text" id="f-descripcion" required>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Tipo</label>
+                    <select id="f-tipo">
+                      <option value="producto">Producto</option>
+                      <option value="servicio">Servicio</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Unidad de medida *</label>
+                    <input type="text" id="f-unidad_medida" required value="PZA" placeholder="PZA, KG, SVC...">
+                  </div>
+                  <div class="form-group">
+                    <label>Precio unitario *</label>
+                    <input type="number" id="f-precio_unitario" required step="0.01">
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>IVA % (IGV)</label>
+                    <input type="number" id="f-iva_porcentaje" value="18" step="0.01">
+                  </div>
+                  <input type="hidden" id="f-ieps_porcentaje" value="0">
+                  <div class="form-group">
+                    <label>Stock</label>
+                    <input type="number" id="f-stock" value="0" step="1">
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                  <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      `);
+      document.getElementById('form').addEventListener('submit', save);
+      load();
+    }
+
+    function render() {
+      const tbody = document.getElementById('tbody');
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      if (!productos.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Sin productos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = productos.map(p => `
+        <tr>
+          <td><strong>${escapeHtml(p.codigo)}</strong></td>
+          <td>${escapeHtml(p.descripcion)}</td>
+          <td>${escapeHtml(p.tipo)}</td>
+          <td>${escapeHtml(p.unidad_medida)}</td>
+          <td class="text-right">${fmtMoney(p.precio_unitario, moneda)}</td>
+          <td class="text-right">${Number(p.iva_porcentaje).toFixed(2)}%</td>
+          <td class="text-right">${Number(p.stock).toFixed(0)}</td>
+          <td class="text-right">
+            <button class="btn btn-sm btn-secondary" onclick="edit(${p.id})">Editar</button>
+            <button class="btn btn-sm btn-danger" onclick="remove(${p.id})">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openModal() {
+      document.getElementById('form').reset();
+      document.getElementById('f-id').value = '';
+      document.getElementById('f-iva_porcentaje').value = 18;
+      document.getElementById('modal-title').textContent = 'Nuevo producto';
+      document.getElementById('modal').classList.add('active');
+    }
+
+    function closeModal() { document.getElementById('modal').classList.remove('active'); }
+
+    async function edit(id) {
+      const { data } = await API.get(`/products/${id}`);
+      Object.keys(data).forEach(k => {
+        const el = document.getElementById('f-' + k);
+        if (el) el.value = data[k] ?? '';
+      });
+      document.getElementById('modal-title').textContent = 'Editar producto';
+      document.getElementById('modal').classList.add('active');
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const body = {
+        empresa_id: Auth.empresaId,
+        codigo: document.getElementById('f-codigo').value,
+        codigo_sat: document.getElementById('f-codigo_sat').value,
+        descripcion: document.getElementById('f-descripcion').value,
+        tipo: document.getElementById('f-tipo').value,
+        unidad_medida: document.getElementById('f-unidad_medida').value,
+        precio_unitario: document.getElementById('f-precio_unitario').value,
+        iva_porcentaje: document.getElementById('f-iva_porcentaje').value,
+        ieps_porcentaje: document.getElementById('f-ieps_porcentaje').value,
+        stock: document.getElementById('f-stock').value
+      };
+      try {
+        if (id) await API.put(`/products/${id}`, body);
+        else    await API.post('/products', body);
+        closeModal();
+        showAlert('#alert-box', 'Producto guardado', 'success');
+        load();
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    async function remove(id) {
+      if (!confirm('¿Eliminar?')) return;
+      await API.del(`/products/${id}`);
+      load();
+    }
+
+    init();
+  </script>
+</body>
+</html>

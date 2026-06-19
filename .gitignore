@@ -1,0 +1,8 @@
+node_modules/
+.env
+*.log
+.DS_Store
+storage/xml/*
+storage/pdf/*
+!storage/xml/.gitkeep
+!storage/pdf/.gitkeep

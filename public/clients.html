@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Clientes - FactuElectrónica</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <script src="/js/api.js"></script>
+  <script src="/js/layout.js"></script>
+  <script>
+    renderLayout('clients', 'Gestión de Clientes');
+
+    let clientes = [], paises = [];
+
+    async function load() {
+      const empresaId = Auth.empresaId;
+      const search = document.getElementById('search')?.value || '';
+      const { data } = await API.get(`/clients?empresa_id=${empresaId}&search=${encodeURIComponent(search)}`);
+      clientes = data;
+      render();
+    }
+
+    async function init() {
+      const r = await API.get('/countries');
+      paises = r.data;
+      setContent(`
+        <div class="card p-0">
+          <div class="card-header">
+            <h2>Clientes</h2>
+            <button class="btn btn-primary" onclick="openModal()">+ Nuevo cliente</button>
+          </div>
+          <div style="padding:14px 22px 0">
+          <div class="toolbar">
+            <input type="text" id="search" placeholder="Buscar por nombre, ID fiscal o email..." oninput="load()">
+          </div>
+          <div id="alert-box"></div>
+          </div>
+          <div class="table-wrapper">
+            <table class="table">
+              <thead><tr>
+                <th>Tipo ID</th><th>Identificación</th><th>Razón social</th>
+                <th>Email</th><th>Ciudad</th><th class="text-right">Acciones</th>
+              </tr></thead>
+              <tbody id="tbody-clientes"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="modal">
+          <div class="modal">
+            <div class="modal-header">
+              <h2 id="modal-title">Nuevo cliente</h2>
+              <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <form id="form-cliente">
+                <input type="hidden" id="f-id">
+                <input type="hidden" id="f-pais_id" value="3">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Tipo persona</label>
+                    <select id="f-tipo_persona">
+                      <option value="fisica">Física</option>
+                      <option value="moral">Moral / Jurídica</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Tipo de identificación *</label>
+                    <select id="f-tipo_identificacion" required>
+                      <option value="RUC">RUC</option>
+                      <option value="DNI">DNI</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Identificación *</label>
+                    <input type="text" id="f-identificacion" required>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Razón social / Nombre *</label>
+                  <input type="text" id="f-razon_social" required>
+                </div>
+                <div class="form-group">
+                  <label>Nombre comercial</label>
+                  <input type="text" id="f-nombre_comercial">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="f-email">
+                  </div>
+                  <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" id="f-telefono">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Dirección</label>
+                  <input type="text" id="f-direccion">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Ciudad</label>
+                    <input type="text" id="f-ciudad">
+                  </div>
+                  <div class="form-group">
+                    <label>Estado / Provincia</label>
+                    <input type="text" id="f-estado_provincia">
+                  </div>
+                  <div class="form-group">
+                    <label>Código postal</label>
+                    <input type="text" id="f-codigo_postal">
+                  </div>
+                </div>
+                <input type="hidden" id="f-uso_cfdi" value="">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Régimen fiscal</label>
+                    <input type="text" id="f-regimen_fiscal">
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                  <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      `);
+
+      document.getElementById('form-cliente').addEventListener('submit', save);
+      load();
+    }
+
+    function render() {
+      const tbody = document.getElementById('tbody-clientes');
+      if (!clientes.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Sin clientes</td></tr>';
+        return;
+      }
+      tbody.innerHTML = clientes.map(c => `
+        <tr>
+          <td>${escapeHtml(c.tipo_identificacion)}</td>
+          <td><strong>${escapeHtml(c.identificacion)}</strong></td>
+          <td>${escapeHtml(c.razon_social)}</td>
+          <td>${escapeHtml(c.email || '')}</td>
+          <td>${escapeHtml(c.ciudad || '')}</td>
+          <td class="text-right">
+            <button class="btn btn-sm btn-secondary" onclick="edit(${c.id})">Editar</button>
+            <button class="btn btn-sm btn-danger" onclick="remove(${c.id})">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openModal() {
+      document.getElementById('form-cliente').reset();
+      document.getElementById('f-id').value = '';
+      document.getElementById('modal-title').textContent = 'Nuevo cliente';
+      document.getElementById('modal').classList.add('active');
+    }
+
+    function closeModal() { document.getElementById('modal').classList.remove('active'); }
+
+    async function edit(id) {
+      const { data } = await API.get(`/clients/${id}`);
+      Object.keys(data).forEach(k => {
+        const el = document.getElementById('f-' + k);
+        if (el) el.value = data[k] ?? '';
+      });
+      document.getElementById('f-id').value = data.id;
+      document.getElementById('modal-title').textContent = 'Editar cliente';
+      document.getElementById('modal').classList.add('active');
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const body = {
+        empresa_id: Auth.empresaId,
+        pais_id: document.getElementById('f-pais_id').value,
+        tipo_identificacion: document.getElementById('f-tipo_identificacion').value,
+        identificacion: document.getElementById('f-identificacion').value,
+        tipo_persona: document.getElementById('f-tipo_persona').value,
+        razon_social: document.getElementById('f-razon_social').value,
+        nombre_comercial: document.getElementById('f-nombre_comercial').value,
+        email: document.getElementById('f-email').value,
+        telefono: document.getElementById('f-telefono').value,
+        direccion: document.getElementById('f-direccion').value,
+        ciudad: document.getElementById('f-ciudad').value,
+        estado_provincia: document.getElementById('f-estado_provincia').value,
+        codigo_postal: document.getElementById('f-codigo_postal').value,
+        uso_cfdi: document.getElementById('f-uso_cfdi').value,
+        regimen_fiscal: document.getElementById('f-regimen_fiscal').value
+      };
+      try {
+        if (id) await API.put(`/clients/${id}`, body);
+        else    await API.post('/clients', body);
+        closeModal();
+        showAlert('#alert-box', 'Cliente guardado', 'success');
+        load();
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    async function remove(id) {
+      if (!confirm('¿Eliminar cliente?')) return;
+      await API.del(`/clients/${id}`);
+      load();
+    }
+
+    init();
+  </script>
+</body>
+</html>

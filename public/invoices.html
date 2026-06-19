@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Facturas - FactuElectrónica</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <script src="/js/api.js"></script>
+  <script src="/js/layout.js"></script>
+  <script>
+    renderLayout('invoices', 'Facturas');
+
+    let facturas = [], clientes = [], productos = [], items = [];
+    let activeTab = '';
+
+    async function load() {
+      const params = new URLSearchParams({ empresa_id: Auth.empresaId });
+      if (activeTab) params.append('estado', activeTab);
+      try {
+        const { data } = await API.get(`/invoices?${params}`);
+        facturas = data;
+        renderList();
+        updateTabCounts();
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    function updateTabCounts() {
+      const counts = {};
+      facturas.forEach(f => { counts[f.estado] = (counts[f.estado] || 0) + 1; });
+      const total = facturas.length;
+      const badge = (sel, n) => {
+        const el = document.querySelector(sel);
+        if (el) el.textContent = n;
+      };
+      badge('[data-badge="all"]', total);
+      badge('[data-badge="borrador"]', counts['borrador'] || 0);
+      badge('[data-badge="emitida"]', (counts['emitida'] || 0) + (counts['timbrada'] || 0));
+      badge('[data-badge="cancelada"]', counts['cancelada'] || 0);
+    }
+
+    async function init() {
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      setContent(`
+        <div class="card p-0">
+          <div class="card-header">
+            <div>
+              <h2>Facturas electrónicas</h2>
+            </div>
+            <button class="btn btn-primary" onclick="openNewInvoice()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Nueva factura
+            </button>
+          </div>
+
+          <div style="padding:16px 22px 0">
+            <div class="tabs">
+              <button class="tab-btn active" onclick="setTab(this,'')">
+                Todas <span class="tab-badge" style="background:#64748b" data-badge="all">0</span>
+              </button>
+              <button class="tab-btn" onclick="setTab(this,'borrador')">
+                Borradores <span class="tab-badge warning" data-badge="borrador">0</span>
+              </button>
+              <button class="tab-btn" onclick="setTab(this,'emitida')">
+                Emitidas <span class="tab-badge success" data-badge="emitida">0</span>
+              </button>
+              <button class="tab-btn" onclick="setTab(this,'cancelada')">
+                Canceladas <span class="tab-badge danger" data-badge="cancelada">0</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="alert-box" style="padding:0 22px"></div>
+
+          <div class="table-wrapper">
+            <table class="table">
+              <thead><tr>
+                <th>Folio</th>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Estado</th>
+                <th class="text-right">Subtotal</th>
+                <th class="text-right">IVA</th>
+                <th class="text-right">Total</th>
+                <th class="text-right">Acciones</th>
+              </tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Modal Detalle -->
+        <div class="modal-overlay" id="modal-detalle">
+          <div class="modal modal-lg">
+            <div class="modal-header">
+              <h2>Detalle de factura</h2>
+              <button class="modal-close" onclick="closeModal('modal-detalle')">&times;</button>
+            </div>
+            <div class="modal-body" id="detalle-body"></div>
+          </div>
+        </div>
+
+        <!-- Modal Nueva Factura -->
+        <div class="modal-overlay" id="modal-nueva">
+          <div class="modal modal-lg">
+            <div class="modal-header">
+              <h2>Nueva factura</h2>
+              <button class="modal-close" onclick="closeModal('modal-nueva')">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div id="alert-modal"></div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Cliente *</label>
+                  <select id="n-cliente_id"></select>
+                </div>
+                <div class="form-group">
+                  <label>Tipo documento</label>
+                  <select id="n-tipo_documento">
+                    <option value="factura">Factura</option>
+                    <option value="boleta">Boleta (PE/CL)</option>
+                    <option value="nota_credito">Nota crédito</option>
+                    <option value="nota_debito">Nota débito</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Forma de pago</label>
+                  <select id="n-forma_pago">
+                    <option value="01">Efectivo</option>
+                    <option value="02">Cheque</option>
+                    <option value="03">Transferencia</option>
+                    <option value="04">Tarjeta crédito</option>
+                    <option value="28">Tarjeta débito</option>
+                    <option value="99">Por definir</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Método de pago</label>
+                  <select id="n-metodo_pago">
+                    <option value="PUE">PUE – Una sola exhibición</option>
+                    <option value="PPD">PPD – Pagos parcialidades</option>
+                  </select>
+                </div>
+              </div>
+
+              <hr class="divider">
+              <div class="flex-between mb-2">
+                <strong style="font-size:13px">Productos / Servicios</strong>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <select id="select-producto" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:220px">
+                    <option value="">— Selecciona un producto —</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" onclick="addItemFromProduct()">Agregar</button>
+                  <button class="btn btn-secondary btn-sm" onclick="addManualItem()">Manual</button>
+                </div>
+              </div>
+
+              <div class="table-wrapper">
+                <table class="table items-table">
+                  <thead><tr>
+                    <th>Descripción</th>
+                    <th class="col-cantidad">Cant.</th>
+                    <th class="col-precio">Precio</th>
+                    <th class="col-iva">IVA %</th>
+                    <th class="col-total text-right">Total</th>
+                    <th class="col-action"></th>
+                  </tr></thead>
+                  <tbody id="items-tbody"></tbody>
+                </table>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;margin-top:14px">
+                <div class="totals-box" style="min-width:280px">
+                  <table style="width:100%">
+                    <tr><td>Subtotal:</td><td class="text-right" id="t-subtotal" style="padding-left:40px">${fmtMoney(0, moneda)}</td></tr>
+                    <tr><td>IVA:</td><td class="text-right" id="t-iva" style="padding-left:40px">${fmtMoney(0, moneda)}</td></tr>
+                    <tr class="total-row"><td><strong>Total:</strong></td><td class="text-right" id="t-total" style="padding-left:40px">${fmtMoney(0, moneda)}</td></tr>
+                  </table>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeModal('modal-nueva')">Cancelar</button>
+                <button class="btn btn-success" onclick="saveInvoice(true)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Guardar y emitir
+                </button>
+                <button class="btn btn-primary" onclick="saveInvoice(false)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  Guardar borrador
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      load();
+    }
+
+    function setTab(btn, estado) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeTab = estado;
+      load();
+    }
+
+    function renderList() {
+      const tbody = document.getElementById('tbody');
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      if (!facturas.length) {
+        const msg = activeTab ? `No hay facturas en estado "${activeTab}"` : 'Aún no hay facturas registradas';
+        tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">
+          <div class="empty-state-icon" style="color: var(--secondary)">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          </div>
+          <h3>${msg}</h3>
+          <p>Crea una nueva factura usando el botón superior derecho.</p>
+          <button class="btn btn-primary" onclick="openNewInvoice()">+ Nueva factura</button>
+        </div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = facturas.map(f => `
+        <tr>
+          <td><strong style="color:var(--primary);font-family:monospace;font-size:13px">${escapeHtml(f.serie)}-${f.folio}</strong></td>
+          <td style="white-space:nowrap">${fmtDate(f.fecha_emision)}</td>
+          <td>
+            <div style="font-weight:500">${escapeHtml(f.cliente_nombre)}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(f.cliente_id_fiscal)}</div>
+          </td>
+          <td><span class="badge badge-${f.estado}">${f.estado}</span></td>
+          <td class="text-right" style="font-size:13px;color:var(--text-muted)">${fmtMoney(f.subtotal, moneda)}</td>
+          <td class="text-right" style="font-size:13px;color:var(--text-muted)">${fmtMoney(f.total_iva, moneda)}</td>
+          <td class="text-right fw-bold">${fmtMoney(f.total, moneda)}</td>
+          <td>
+            <div class="actions-cell">
+              <button class="btn btn-sm btn-secondary" onclick="ver(${f.id})" title="Ver detalle">Ver</button>
+              ${f.estado === 'borrador' ? `<button class="btn btn-sm btn-success" onclick="emitir(${f.id})">Emitir</button>` : ''}
+              ${f.estado === 'emitida' || f.estado === 'timbrada' ? `<button class="btn btn-sm btn-primary" onclick="descargarXML(${f.id},'${f.serie}-${f.folio}.xml')">XML</button><button class="btn btn-sm btn-secondary" onclick="descargarPDF(${f.id},'${f.serie}-${f.folio}.pdf')">PDF</button>` : ''}
+              ${f.estado !== 'cancelada' ? `<button class="btn btn-sm btn-danger" onclick="cancelar(${f.id})" title="Cancelar">✕</button>` : ''}
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function ver(id) {
+      const { data } = await API.get(`/invoices/${id}`);
+      const moneda = data.moneda || Auth.empresaActual?.moneda_codigo || 'PEN';
+      document.getElementById('detalle-body').innerHTML = `
+        <div style="background:var(--bg);border-radius:10px;padding:16px 20px;margin-bottom:18px;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+          <div>
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Folio</div>
+            <strong style="font-size:20px;color:var(--primary);font-family:monospace">${escapeHtml(data.serie)}-${data.folio}</strong>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Fecha</div>
+            <strong>${fmtDateTime(data.fecha_emision)}</strong>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Estado</div>
+            <span class="badge badge-${data.estado}">${data.estado}</span>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:16px">
+          <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 18px">
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Emisor</div>
+            <div style="font-weight:600">${escapeHtml(data.empresa_nombre)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${escapeHtml(data.empresa_id_fiscal)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(data.empresa_direccion || '')}</div>
+          </div>
+          <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 18px">
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Receptor</div>
+            <div style="font-weight:600">${escapeHtml(data.cliente_nombre)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${escapeHtml(data.cliente_tipo_id || '')}: ${escapeHtml(data.cliente_identificacion)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(data.cliente_direccion || '')}</div>
+          </div>
+        </div>
+
+        ${data.uuid ? `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 14px;margin-bottom:16px">
+          <span style="font-size:11px;font-weight:700;color:#0369a1">UUID/CUFE:</span>
+          <code style="font-size:11px;word-break:break-all;color:#0c4a6e;margin-left:6px">${escapeHtml(data.uuid)}</code>
+        </div>` : ''}
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Conceptos</div>
+        <table class="table">
+          <thead><tr>
+            <th>Cant.</th><th>Descripción</th>
+            <th class="text-right">P.U.</th><th class="text-right">IVA</th><th class="text-right">Total</th>
+          </tr></thead>
+          <tbody>
+            ${data.items.map(i => `
+              <tr>
+                <td>${Number(i.cantidad).toFixed(2)}</td>
+                <td>${escapeHtml(i.descripcion)}</td>
+                <td class="text-right">${fmtMoney(i.precio_unitario, moneda)}</td>
+                <td class="text-right">${fmtMoney(i.iva_monto, moneda)}</td>
+                <td class="text-right fw-bold">${fmtMoney(i.total, moneda)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:16px">
+          <div class="totals-box" style="min-width:260px">
+            <table style="width:100%">
+              <tr><td>Subtotal:</td><td class="text-right" style="padding-left:30px">${fmtMoney(data.subtotal, moneda)}</td></tr>
+              <tr><td>IVA:</td><td class="text-right" style="padding-left:30px">${fmtMoney(data.total_iva, moneda)}</td></tr>
+              <tr class="total-row"><td><strong>Total:</strong></td><td class="text-right" style="padding-left:30px">${fmtMoney(data.total, moneda)}</td></tr>
+            </table>
+          </div>
+        </div>
+
+        ${data.xml_path ? `<div class="mt-3" style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="descargarXML(${data.id},'${data.serie}-${data.folio}.xml')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Descargar XML
+          </button>
+          <button class="btn btn-secondary" onclick="descargarPDF(${data.id},'${data.serie}-${data.folio}.pdf')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Descargar PDF
+          </button>
+        </div>` : ''}
+      `;
+      document.getElementById('modal-detalle').classList.add('active');
+    }
+
+    async function emitir(id) {
+      if (!confirm('¿Emitir factura? Se generará el XML según el formato del país.')) return;
+      try {
+        const r = await API.post(`/invoices/${id}/emitir`);
+        showAlert('#alert-box', `✓ Factura emitida. UUID: ${(r.uuid || '').substring(0,16)}...`, 'success');
+        load();
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    async function cancelar(id) {
+      const motivo = prompt('Motivo de cancelación:');
+      if (motivo === null) return;
+      try {
+        await API.post(`/invoices/${id}/cancelar`, { motivo });
+        load();
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    function closeModal(mid) { document.getElementById(mid).classList.remove('active'); }
+
+    async function openNewInvoice() {
+      const [cs, ps] = await Promise.all([
+        API.get(`/clients?empresa_id=${Auth.empresaId}`),
+        API.get(`/products?empresa_id=${Auth.empresaId}`)
+      ]);
+      clientes = cs.data; productos = ps.data; items = [];
+
+      const cliSel = document.getElementById('n-cliente_id');
+      cliSel.innerHTML = '<option value="">— Selecciona cliente —</option>' +
+        clientes.map(c => `<option value="${c.id}">${escapeHtml(c.razon_social)} (${escapeHtml(c.identificacion)})</option>`).join('');
+
+      const prodSel = document.getElementById('select-producto');
+      prodSel.innerHTML = '<option value="">— Selecciona un producto —</option>' +
+        productos.map(p => `<option value="${p.id}">${escapeHtml(p.codigo)} – ${escapeHtml(p.descripcion)} (${fmtMoney(p.precio_unitario, Auth.empresaActual?.moneda_codigo)})</option>`).join('');
+
+      renderItems();
+      document.getElementById('modal-nueva').classList.add('active');
+    }
+
+    function addItemFromProduct() {
+      const id = document.getElementById('select-producto').value;
+      if (!id) { alert('Selecciona un producto'); return; }
+      const p = productos.find(x => x.id == id);
+      items.push({
+        producto_id: p.id, codigo: p.codigo, codigo_sat: p.codigo_sat,
+        descripcion: p.descripcion, unidad_medida: p.unidad_medida,
+        cantidad: 1, precio_unitario: Number(p.precio_unitario),
+        descuento: 0, iva_porcentaje: Number(p.iva_porcentaje),
+        ieps_porcentaje: Number(p.ieps_porcentaje || 0)
+      });
+      renderItems();
+    }
+
+    function addManualItem() {
+      items.push({
+        descripcion: '', unidad_medida: 'PZA', cantidad: 1,
+        precio_unitario: 0, descuento: 0,
+        iva_porcentaje: 18
+      });
+      renderItems();
+    }
+
+    function renderItems() {
+      const tbody = document.getElementById('items-tbody');
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state" style="padding:20px">
+          <div class="empty-state-icon" style="color: var(--secondary); display: flex; justify-content: center; margin-bottom: 8px;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><polygon points="12 22.08 12 12 3 6.92 3 17.08 12 22.08"></polygon><polygon points="12 22.08 21 17.08 21 6.92 12 12 12 22.08"></polygon><polygon points="12 12 21 6.92 12 1.84 3 6.92 12 12"></polygon></svg>
+          </div>
+          <p style="margin:0">Agrega productos a la factura usando los botones de arriba</p>
+        </div></td></tr>`;
+        updateTotals(); return;
+      }
+      tbody.innerHTML = items.map((it, idx) => {
+        const importe = it.cantidad * it.precio_unitario - (it.descuento || 0);
+        const iva = importe * (it.iva_porcentaje || 0) / 100;
+        return `
+          <tr>
+            <td><input type="text" value="${escapeHtml(it.descripcion)}" oninput="items[${idx}].descripcion=this.value;updateTotals()" style="width:100%;min-width:160px"></td>
+            <td><input type="number" value="${it.cantidad}" step="0.01" min="0.01" oninput="items[${idx}].cantidad=Number(this.value);renderItems()"></td>
+            <td><input type="number" value="${it.precio_unitario}" step="0.01" min="0" oninput="items[${idx}].precio_unitario=Number(this.value);renderItems()"></td>
+            <td><input type="number" value="${it.iva_porcentaje}" step="0.01" min="0" oninput="items[${idx}].iva_porcentaje=Number(this.value);renderItems()"></td>
+            <td class="text-right fw-bold">${fmtMoney(importe + iva, moneda)}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="items.splice(${idx},1);renderItems()">×</button></td>
+          </tr>`;
+      }).join('');
+      updateTotals();
+    }
+
+    function updateTotals() {
+      const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+      let subtotal = 0, iva = 0;
+      items.forEach(it => {
+        const imp = (it.cantidad || 0) * (it.precio_unitario || 0) - (it.descuento || 0);
+        subtotal += imp;
+        iva += imp * (it.iva_porcentaje || 0) / 100;
+      });
+      document.getElementById('t-subtotal').textContent = fmtMoney(subtotal, moneda);
+      document.getElementById('t-iva').textContent = fmtMoney(iva, moneda);
+      document.getElementById('t-total').textContent = fmtMoney(subtotal + iva, moneda);
+    }
+
+    async function saveInvoice(emitirFlag) {
+      const cliente_id = document.getElementById('n-cliente_id').value;
+      if (!cliente_id) { showAlert('#alert-modal', 'Selecciona un cliente'); return; }
+      if (!items.length) { showAlert('#alert-modal', 'Agrega al menos un ítem'); return; }
+      const body = {
+        empresa_id: Auth.empresaId, cliente_id,
+        tipo_documento: document.getElementById('n-tipo_documento').value,
+        forma_pago: document.getElementById('n-forma_pago').value,
+        metodo_pago: document.getElementById('n-metodo_pago').value,
+        fecha_emision: new Date().toISOString().slice(0,19).replace('T',' '),
+        items
+      };
+      try {
+        const r = await API.post('/invoices', body);
+        if (emitirFlag) {
+          await API.post(`/invoices/${r.id}/emitir`);
+          showAlert('#alert-box', `✓ Factura ${r.serie}-${r.folio} emitida correctamente`, 'success');
+        } else {
+          showAlert('#alert-box', `✓ Borrador ${r.serie}-${r.folio} guardado`, 'success');
+        }
+        closeModal('modal-nueva');
+        load();
+      } catch (err) {
+        showAlert('#alert-modal', err.message);
+      }
+    }
+
+
+    // ── Descarga autenticada (XML / PDF) ──────────────────────────
+    async function descargarXML(id, filename) {
+      try {
+        const res = await fetch(`/api/invoices/${id}/xml`, {
+          headers: { 'Authorization': 'Bearer ' + Auth.token }
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename || `factura-${id}.xml`; a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) { showAlert('#alert-box', 'Error descargando XML: ' + err.message); }
+    }
+
+    async function descargarPDF(id, filename) {
+      try {
+        const res = await fetch(`/api/invoices/${id}/pdf`, {
+          headers: { 'Authorization': 'Bearer ' + Auth.token }
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({ message: 'Error generando PDF' }));
+          throw new Error(e.message);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename || `factura-${id}.pdf`; a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) { showAlert('#alert-box', 'Error descargando PDF: ' + err.message); }
+    }
+
+    init();
+  </script>
+</body>
+</html>

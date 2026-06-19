@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - FactuElectrónica</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-logo">
+        <div style="width:56px;height:56px;background:linear-gradient(135deg,#2563eb,#7c3aed);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 8px 24px rgba(37,99,235,0.35)">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h1>FactuElectrónica</h1>
+        <p>Facturación electrónica SUNAT</p>
+      </div>
+      <div id="alert-box"></div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="email">Correo electrónico</label>
+          <input type="email" id="email" required value="admin@factu.com" placeholder="admin@factu.com">
+        </div>
+        <div class="form-group">
+          <label for="password">Contraseña</label>
+          <input type="password" id="password" required value="admin123" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" style="padding:11px;font-size:14px;border-radius:9px;margin-top:4px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          Iniciar sesion
+        </button>
+      </form>
+      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:18px;padding:10px;background:var(--bg);border-radius:8px">
+        <strong>Demo:</strong> admin@factu.com / admin123
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    if (Auth.token) location.href = "/dashboard.html";
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      try {
+        const data = await API.post("/auth/login", { email, password });
+        Auth.token = data.token;
+        Auth.user = data.user;
+        Auth.empresas = data.empresas || [];
+        if (data.empresas && data.empresas.length) Auth.empresaId = data.empresas[0].id;
+        location.href = "/dashboard.html";
+      } catch (err) {
+        showAlert("#alert-box", err.message);
+      }
+    });
+  </script>
+</body>
+</html>

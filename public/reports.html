@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reportes - FactuElectrónica</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <script src="/js/api.js"></script>
+  <script src="/js/layout.js"></script>
+  <script>
+    renderLayout('reports', 'Reportes');
+
+    let datos = [];
+    let barChart = null;
+    
+    function init() {
+      const today = new Date().toISOString().slice(0, 10);
+      const monthStart = new Date(); monthStart.setDate(1);
+      const startStr = monthStart.toISOString().slice(0, 10);
+
+      setContent(`
+        <div class="card p-0">
+          <div class="card-header">
+            <div>
+              <h2>Reporte de facturas por periodo</h2>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Desde: <input type="date" id="desde" value="${startStr}" style="padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)">
+                Hasta: <input type="date" id="hasta" value="${today}" style="padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px">
+              </div>
+              <button class="btn btn-primary" onclick="generar()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Generar
+              </button>
+              <button class="btn btn-secondary" onclick="exportCSV()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                CSV
+              </button>
+            </div>
+          </div>
+
+          <div id="alert-box" style="padding:0 22px"></div>
+          <div id="resumen-cards" style="padding:20px 22px 0;display:none">
+            <div class="stats-grid" id="resumen"></div>
+            <div class="dashboard-grid" style="margin-bottom:20px">
+              <div class="card-modern" style="margin-bottom:0">
+                <div class="card-title">Facturación del periodo</div>
+                <div class="card-subtitle">Totales por día en el rango seleccionado</div>
+                <div class="chart-container"><canvas id="chart-periodo"></canvas></div>
+              </div>
+              <div class="card-modern" style="margin-bottom:0">
+                <div class="card-title">Distribución por estado</div>
+                <div class="card-subtitle">Composición del periodo</div>
+                <div class="chart-container"><canvas id="chart-estados-rep"></canvas></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-wrapper" style="padding:0 0 22px">
+            <div id="table-header" style="padding:0 22px 14px;display:none">
+              <strong style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px" id="table-count"></strong>
+            </div>
+            <table class="table">
+              <thead><tr>
+                <th>Folio</th><th>Fecha</th><th>Cliente</th>
+                <th>Estado</th><th class="text-right">IVA</th><th class="text-right">Total</th>
+              </tr></thead>
+              <tbody id="tbody">
+                <tr><td colspan="7">
+                  <div class="empty-state">
+                    <div class="empty-state-icon" style="color: var(--secondary)">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    </div>
+                    <h3>Selecciona un rango de fechas</h3>
+                    <p>Ajusta el periodo y haz clic en "Generar" para ver los resultados.</p>
+                  </div>
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `);
+    }
+
+    async function generar() {
+      const desde = document.getElementById('desde').value;
+      const hasta = document.getElementById('hasta').value;
+      try {
+        const { data } = await API.get(`/reports/facturas-periodo?empresa_id=${Auth.empresaId}&fecha_desde=${desde}&fecha_hasta=${hasta}`);
+        datos = data;
+        const moneda = Auth.empresaActual?.moneda_codigo || 'PEN';
+        const total = data.reduce((s, f) => s + Number(f.total || 0), 0);
+        const iva   = data.reduce((s, f) => s + Number(f.total_iva || 0), 0);
+        const emit  = data.filter(f => ['emitida','timbrada'].includes(f.estado)).length;
+        const borr  = data.filter(f => f.estado === 'borrador').length;
+        const canc  = data.filter(f => f.estado === 'cancelada').length;
+
+        document.getElementById('resumen-cards').style.display = 'block';
+        document.getElementById('table-header').style.display = 'block';
+        document.getElementById('table-count').textContent = `${data.length} factura${data.length !== 1 ? 's' : ''} encontrada${data.length !== 1 ? 's' : ''}`;
+
+        document.getElementById('resumen').innerHTML = `
+          <div class="stat-card">
+            <div class="stat-icon bg-primary">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            </div>
+            <div class="stat-label">Total facturado</div>
+            <div class="stat-value">${fmtMoney(total, moneda)}</div>
+            <div class="stat-extra">${data.length} facturas en total</div>
+          </div>
+          <div class="stat-card success">
+            <div class="stat-icon bg-success">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11"></polyline></svg>
+            </div>
+            <div class="stat-label">Emitidas</div>
+            <div class="stat-value">${emit}</div>
+            <div class="stat-extra">${data.length ? Math.round(emit/data.length*100) : 0}% del periodo</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="stat-icon bg-warning">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path></svg>
+            </div>
+            <div class="stat-label">Borradores</div>
+            <div class="stat-value">${borr}</div>
+            <div class="stat-extra">Pendientes de emitir</div>
+          </div>
+          <div class="stat-card info">
+            <div class="stat-icon bg-info">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            </div>
+            <div class="stat-label">IVA total</div>
+            <div class="stat-value">${fmtMoney(iva, moneda)}</div>
+            <div class="stat-extra">Impuestos del periodo</div>
+          </div>
+        `;
+
+        // Build chart data by date
+        const byDate = {};
+        data.forEach(f => {
+          const d = f.fecha_emision ? f.fecha_emision.substring(0, 10) : 'N/A';
+          byDate[d] = (byDate[d] || 0) + Number(f.total || 0);
+        });
+        const dateLabels = Object.keys(byDate).sort();
+        const dateValues = dateLabels.map(d => byDate[d]);
+
+        // Bar chart - facturación por día
+        if (barChart) { barChart.destroy(); barChart = null; }
+        const ctxBar = document.getElementById('chart-periodo').getContext('2d');
+        const grad = ctxBar.createLinearGradient(0, 0, 0, 260);
+        grad.addColorStop(0, 'rgba(37,99,235,0.7)');
+        grad.addColorStop(1, 'rgba(37,99,235,0.1)');
+        barChart = new Chart(ctxBar, {
+          type: 'bar',
+          data: {
+            labels: dateLabels.length ? dateLabels : ['Sin datos'],
+            datasets: [{
+              label: 'Total',
+              data: dateValues.length ? dateValues : [0],
+              backgroundColor: grad,
+              borderRadius: 6,
+              borderSkipped: false,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: 'rgba(15,23,42,0.9)',
+                callbacks: { label: ctx => fmtMoney(ctx.parsed.y, moneda) }
+              }
+            },
+            scales: {
+              x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+              y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 }, callback: v => fmtMoney(v, moneda).replace(/\.00$/, '') } }
+            }
+          }
+        });
+
+        // Doughnut estados
+        const ctxDough = document.getElementById('chart-estados-rep').getContext('2d');
+        new Chart(ctxDough, {
+          type: 'doughnut',
+          data: {
+            labels: ['Emitidas', 'Borradores', 'Canceladas'],
+            datasets: [{
+              data: [emit, borr, canc],
+              backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+              borderColor: 'white', borderWidth: 3, hoverOffset: 6
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, cutout: '65%',
+            plugins: { legend: { position: 'bottom', labels: { padding: 14, font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' } } }
+          }
+        });
+
+        const tbody = document.getElementById('tbody');
+        if (!data.length) {
+          tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+            <div class="empty-state-icon" style="color: var(--secondary)">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </div>
+            <h3>Sin resultados</h3>
+            <p>No se encontraron facturas en el periodo seleccionado.</p>
+          </div></td></tr>`;
+          return;
+        }
+        tbody.innerHTML = data.map(f => `
+          <tr>
+            <td><strong style="font-family:monospace;color:var(--primary)">${escapeHtml(f.serie)}-${f.folio}</strong></td>
+            <td style="white-space:nowrap">${fmtDate(f.fecha_emision)}</td>
+            <td>
+              <div>${escapeHtml(f.cliente)}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(f.cliente_id || '')}</div>
+            </td>
+            <td><span class="badge badge-${f.estado}">${f.estado}</span></td>
+            <td class="text-right" style="color:var(--text-muted)">${fmtMoney(f.total_iva, moneda)}</td>
+            <td class="text-right fw-bold">${fmtMoney(f.total, moneda)}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        showAlert('#alert-box', err.message);
+      }
+    }
+
+    function exportCSV() {
+      if (!datos.length) { alert('Genera el reporte primero'); return; }
+      const headers = ['Serie','Folio','Fecha','Cliente','ID Cliente','Estado','IVA','Total'];
+      const rows = datos.map(f => [
+        f.serie, f.folio, f.fecha_emision,
+        f.cliente, f.cliente_id, f.estado, f.total_iva, f.total
+      ]);
+      const csv = [headers, ...rows].map(r => r.map(c => `"${(c ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `reporte-facturas-${new Date().toISOString().slice(0,10)}.csv`;
+      link.click();
+    }
+
+    init();
+  </script>
+</body>
+</html>
